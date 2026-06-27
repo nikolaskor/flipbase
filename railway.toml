@@ -1,0 +1,13 @@
+# Railway-konfig. To tjenester fra samme repo:
+#   web  -> FastAPI (helse + manuell trigger)
+#   cron -> scheduler hvert 7. minutt
+#
+# Sett cron-schedule i Railway-dashboardet paa scheduler-tjenesten:
+#   */7 * * * *   python -m src.scheduler
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "uvicorn src.main:app --host 0.0.0.0 --port $PORT"
+restartPolicyType = "on_failure"
