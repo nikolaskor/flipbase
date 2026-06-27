@@ -38,6 +38,18 @@ Du tar den endelige beslutningen (stand, selger, frakt vs henting).
 4. Kjor SQL i `sql/` mot Supabase
 5. `python -m src.scheduler` (eller sett opp Railway cron)
 
+## Verifiser FINN-scraperen (M1)
+FINN endrer DOM jevnlig, sa selektorene i `scrapers/finn.py` maa verifiseres mot
+live HTML. Kjor dette lokalt (der FINN er naabar):
+
+```bash
+python -m scripts.verify_finn               # last iPhone-sok, skriv ut treff
+python -m scripts.verify_finn --dump        # lagre live HTML for selektor-revisjon
+python -m scripts.verify_finn --supabase    # normaliser + upsert nye annonser til Supabase
+```
+
+Parser-logikken testes offline mot fikstur-HTML: `python -m pytest tests/test_finn_scraper.py`.
+
 ## Byggerekkefolge
 Se Notion-siden for full plan. Kort: scraper + lagring + sold-tracking forst,
 deretter prismotor + Telegram, sa red-flags + vision, sa likviditetsvekting.
