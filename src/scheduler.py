@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from statistics import median as _median
 
 from src.config import settings
 from src.db import repository as repo
@@ -31,13 +32,28 @@ WATCHLISTS: list[tuple[Category, dict]] = [
     (Category.CAMERA, {"query": "sony+kamera"}),
 ]
 
-# Midlertidige statiske referanser til egen sold-data er tykk nok.
+# Statiske referansepriser (Prisjakt bruktpris, oppdater etter egne data).
+# Dekker baade modeller med lagring i tittel ("iphone_13_128gb") og uten
+# ("iphone_13"). normalize() legger til lagring naar den finnes i tittelen.
 STATIC_FALLBACK: dict[str, int] = {
-    "iphone_13_128gb": 3400,
-    "airpods_pro_2": 1200,
-    "ipad_air": 3200,
-    "ps5": 4500,
-    "switch_oled": 2000,
+    # iphone med lagring
+    "iphone_11_64gb": 1800, "iphone_11_128gb": 2000, "iphone_11_256gb": 2300,
+    "iphone_12_64gb": 2400, "iphone_12_128gb": 2700, "iphone_12_256gb": 3000,
+    "iphone_13_128gb": 3400, "iphone_13_256gb": 3800, "iphone_13_512gb": 4200,
+    "iphone_14_128gb": 4500, "iphone_14_256gb": 5000, "iphone_14_512gb": 5500,
+    "iphone_15_128gb": 6000, "iphone_15_256gb": 6500,
+    # iphone uten lagring (fallback for titler som ikke nevner GB)
+    "iphone_11": 2000, "iphone_12": 2700, "iphone_13": 3400,
+    "iphone_14": 4500, "iphone_14_plus": 4800,
+    "iphone_14_pro": 6000, "iphone_14_pro_max": 7000,
+    "iphone_15": 6000, "iphone_15_plus": 6500,
+    "iphone_15_pro": 8000, "iphone_15_pro_max": 9000,
+    "iphone_16": 7500, "iphone_16_plus": 8000,
+    "iphone_16_pro": 9500, "iphone_16_pro_max": 10500,
+    # tilbehoer og annet
+    "airpods_pro_2": 1200, "airpods_pro": 900, "airpods_3": 700,
+    "ipad_air": 3200, "ipad_pro": 5000, "ipad_mini": 2500,
+    "ps5": 4500, "switch_oled": 2000, "switch": 1500,
 }
 
 
@@ -66,7 +82,7 @@ async def _evaluate(listing: Listing, vision_budget: int) -> int:
         return vision_budget
 
     sample = repo.reference_sample(listing.model_key)
-    ref_price = int(sum(sample) / len(sample)) if sample else 0
+    ref_price = int(_median(sample)) if sample else 0
     ctx = PriceContext(
         reference_price=ref_price,
         sample_size=len(sample),
