@@ -17,8 +17,21 @@ _MODEL_PATTERNS: list[tuple[Category, str, str]] = [
     (Category.TABLET, r"ipad\s*(pro|air|mini)?", "ipad"),
     (Category.CONSOLE, r"(ps5|playstation\s*5)", "ps5"),
     (Category.CONSOLE, r"(nintendo\s*)?switch\s*(oled|lite)?", "switch"),
-    (Category.CAMERA, r"(sony|canon|fujifilm|nikon)\s*[a-z0-9\-]+", "camera"),
+    (Category.CAMERA, r"(?:sony|canon|fujifilm|nikon)\s*(?:alpha\s+)?([a-z0-9][a-z0-9\-]*)", "camera"),
 ]
+
+# Kanoniske aliaser: fullstavede merkenavn og med-prefix-varianter -> stabil nokkel.
+# Noedvendig fordi regex-matchen inkluderer "Nintendo " og "PlayStation " i teksten.
+_KEY_ALIASES: dict[str, str] = {
+    "playstation_5": "ps5",
+    "playstation_5_slim": "ps5",
+    "nintendo_switch": "switch",
+    "nintendo_switch_oled": "switch_oled",
+    "nintendo_switch_lite": "switch_lite",
+}
+
+# Bare disse kategoriene bruker lagring (128GB/512GB) som prisdifferensiator.
+_STORAGE_CATEGORIES = {Category.PHONE, Category.TABLET}
 
 
 def normalize(raw: RawListing, category: Category) -> Listing | None:
@@ -57,9 +70,11 @@ def _derive_model_key(title: str, category: Category) -> str:
         m = re.search(pattern, t)
         if m:
             slug = re.sub(r"\s+", "_", m.group(0).strip())
-            # storage-modeller (128/256/512gb / 1tb) er priskritisk for telefoner/nettbrett
+            slug = slug.replace("-", "_")  # kamera-modeller: "zv-e10" -> "zv_e10"
+            slug = _KEY_ALIASES.get(slug, slug)
+            # lagring (128gb/512gb/1tb) er priskritisk bare for telefoner og nettbrett
             storage = re.search(r"(\d+)\s*(gb|tb)", t)
-            if storage:
+            if storage and category in _STORAGE_CATEGORIES:
                 slug += f"_{storage.group(1)}{storage.group(2)}"
             return slug
     return f"{category.value}_unknown"

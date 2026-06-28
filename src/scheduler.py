@@ -53,7 +53,10 @@ STATIC_FALLBACK: dict[str, int] = {
     # tilbehoer og annet
     "airpods_pro_2": 1200, "airpods_pro": 900, "airpods_3": 700,
     "ipad_air": 3200, "ipad_pro": 5000, "ipad_mini": 2500,
-    "ps5": 4500, "switch_oled": 2000, "switch": 1500,
+    "ps5": 4500, "switch_oled": 2000, "switch": 1500, "switch_lite": 1200,
+    # Sony kamera (Prisjakt bruktpris-estimat, oppdater etter egne data)
+    "sony_zv_e10": 3000, "sony_a6000": 2500, "sony_a6400": 5000,
+    "sony_a7": 12000, "sony_a7c": 10000, "sony_a7iii": 12000,
 }
 
 
