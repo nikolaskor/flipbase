@@ -7,6 +7,7 @@ pipelinen: scrape -> normaliser -> sold-tracking -> pris -> likviditet
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 from src.config import settings
 from src.db import repository as repo
@@ -104,12 +105,23 @@ async def _evaluate(listing: Listing, vision_budget: int) -> int:
 
 
 def _reconcile_sold(source: str, category: str, seen_now: set[str]) -> None:
-    """Annonser som var aktive men ikke dukket opp naa: antatt solgt/fjernet."""
-    previously_active = repo.active_external_ids(source, category)
-    disappeared = previously_active - seen_now
-    # NB: classify_disappeared per annonse krever first/last_seen fra DB.
-    # Forenklet her: marker som SOLD, raffiner med per-rad-klassifisering.
-    repo.mark_disappeared(source, list(disappeared), ListingStatus.SOLD)
+    """Annonser som var aktive men ikke dukket opp naa: klassifiser som solgt eller fjernet."""
+    active_rows = repo.get_active_listings_with_timestamps(source, category)
+    disappeared = [r for r in active_rows if r["external_id"] not in seen_now]
+
+    to_sell: list[str] = []
+    to_remove: list[str] = []
+    for r in disappeared:
+        first = datetime.fromisoformat(r["first_seen"])
+        last = datetime.fromisoformat(r["last_seen"])
+        status = classify_disappeared(first, last)
+        if status == ListingStatus.SOLD:
+            to_sell.append(r["external_id"])
+        else:
+            to_remove.append(r["external_id"])
+
+    repo.mark_disappeared(source, to_sell, ListingStatus.SOLD)
+    repo.mark_disappeared(source, to_remove, ListingStatus.REMOVED)
 
 
 if __name__ == "__main__":

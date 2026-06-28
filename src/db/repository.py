@@ -29,22 +29,25 @@ def upsert_listing(listing: Listing) -> None:
     }, on_conflict="source,external_id").execute()
 
 
-def active_external_ids(source: str, category: str) -> set[str]:
+def get_active_listings_with_timestamps(source: str, category: str) -> list[dict]:
+    """Henter external_id, first_seen og last_seen for alle aktive annonser."""
     rows = (db().table("listings")
-            .select("external_id")
+            .select("external_id,first_seen,last_seen")
             .eq("source", source)
             .eq("category", category)
             .eq("status", ListingStatus.ACTIVE.value)
             .execute())
-    return {r["external_id"] for r in rows.data}
+    return rows.data
 
 
 def mark_disappeared(source: str, external_ids: list[str], status: ListingStatus) -> None:
     if not external_ids:
         return
+    update: dict = {"status": status.value}
+    if status == ListingStatus.SOLD:
+        update["sold_at"] = datetime.now(timezone.utc).isoformat()
     (db().table("listings")
-     .update({"status": status.value,
-              "sold_at": datetime.now(timezone.utc).isoformat()})
+     .update(update)
      .eq("source", source)
      .in_("external_id", external_ids)
      .execute())
