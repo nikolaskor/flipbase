@@ -3,12 +3,15 @@
 Railway cron kaller denne hvert N. minutt. Den binder sammen hele
 pipelinen: scrape -> normaliser -> sold-tracking -> pris -> likviditet
 -> red-flags -> vision -> varsel.
+
+Prisjakt-priser oppdateres maksimalt en gang per dag per modell og
+caches i Supabase. Disse brukes som fallback naar vi mangler FINN-salgdata.
 """
 from __future__ import annotations
 
 import asyncio
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from statistics import median as _median
 
 from src.config import settings
@@ -22,6 +25,7 @@ from src.pipeline.pricing import PriceContext
 from src.pipeline.sold_tracker import classify_disappeared
 from src.notify import telegram
 from src.scrapers.finn import FinnScraper
+from src.scrapers.prisjakt import fetch_new_price, used_estimate_from_new
 
 
 def _parse_ts(ts: str) -> datetime:
@@ -36,7 +40,7 @@ WATCHLISTS: list[tuple[Category, dict]] = [
     (Category.PHONE, {"query": "iphone"}),
 ]
 
-# Statiske referansepriser (Prisjakt bruktpris, oppdater etter egne data).
+# Statisk fallback brukes NÅR Prisjakt-scraper feiler og vi mangler FINN-data.
 # Dekker baade modeller med lagring i tittel ("iphone_13_128gb") og uten
 # ("iphone_13"). normalize() legger til lagring naar den finnes i tittelen.
 STATIC_FALLBACK: dict[str, int] = {
@@ -58,10 +62,32 @@ STATIC_FALLBACK: dict[str, int] = {
     "airpods_pro_2": 1200, "airpods_pro": 900, "airpods_3": 700,
     "ipad_air": 3200, "ipad_pro": 5000, "ipad_mini": 2500,
     "ps5": 4500, "switch_oled": 2000, "switch": 1500, "switch_lite": 1200,
-    # Sony kamera (Prisjakt bruktpris-estimat, oppdater etter egne data)
     "sony_zv_e10": 3000, "sony_a6000": 2500, "sony_a6400": 5000,
     "sony_a7": 12000, "sony_a7c": 10000, "sony_a7iii": 12000,
 }
+
+_PRISJAKT_TTL = timedelta(days=1)
+
+
+async def _prisjakt_used_estimate(model_key: str) -> int | None:
+    """Returnerer brukt-estimat fra Prisjakt (cachet i DB, oppdateres daglig)."""
+    cached = repo.get_prisjakt_price(model_key)
+    if cached:
+        new_price, fetched_at = cached
+        age = datetime.now(timezone.utc) - fetched_at.replace(tzinfo=timezone.utc)
+        if age < _PRISJAKT_TTL:
+            return used_estimate_from_new(model_key, new_price)
+
+    # Cache er utloept eller mangler; hent live fra Prisjakt.
+    new_price = await fetch_new_price(model_key)
+    if new_price:
+        repo.upsert_prisjakt_price(model_key, new_price)
+        return used_estimate_from_new(model_key, new_price)
+
+    # Prisjakt feilet; bruk cachet verdi selv om den er gammel.
+    if cached:
+        return used_estimate_from_new(model_key, cached[0])
+    return None
 
 
 async def run_once() -> None:
@@ -92,16 +118,28 @@ async def _evaluate(listing: Listing, vision_budget: int) -> int:
     ref_price = int(_median(sample)) if sample else 0
     market_sample = repo.active_market_sample(listing.model_key)
     market_med = int(_median(market_sample)) if market_sample else None
+    prisjakt_est = await _prisjakt_used_estimate(listing.model_key)
     ctx = PriceContext(
         reference_price=ref_price,
         sample_size=len(sample),
         static_fallback=STATIC_FALLBACK.get(listing.model_key),
         market_median=market_med,
+        prisjakt_used_estimate=prisjakt_est,
     )
-    if ctx.reference_price == 0 and ctx.market_median is None and ctx.static_fallback is None:
+    if ctx.reference_price == 0 and ctx.market_median is None \
+            and ctx.static_fallback is None and ctx.prisjakt_used_estimate is None:
         return vision_budget  # ingen prisbasis enda
 
-    flip_score, sell, net_margin = pricing.compute_flip_score(listing, ctx)
+    # Trekk flagg fra beskrivelsestekst og juster salgspris FoR terskelvurdering.
+    # Slik slipper vi aa sende vision-budsjett paa aapenlyst defekte annonser.
+    text_flags = redflags.detect(listing)
+    _, raw_sell, _ = pricing.compute_flip_score(listing, ctx)
+    sell = pricing.adjust_for_flags(raw_sell, text_flags)
+
+    ship = pricing.shipping_cost(listing)
+    net_margin = sell - listing.price - ship
+    flip_score = round(net_margin / listing.price, 3) if listing.price else 0.0
+
     dts = liquidity.median_days_to_sold(repo.sold_durations(listing.model_key))
     adj = liquidity.adjusted_score(flip_score, dts)
 
@@ -112,17 +150,24 @@ async def _evaluate(listing: Listing, vision_budget: int) -> int:
     if vision_budget > 0:
         v = await vision.assess(listing)
         vision_budget -= 1
+        if v:
+            sell = pricing.adjust_for_vision(sell, v)
+            net_margin = sell - listing.price - ship
+            adj = round(net_margin / listing.price, 3) if listing.price else 0.0
+
+    haggle = pricing.compute_haggle_price(listing.price, sell, ship, v, text_flags)
 
     opp = FlipOpportunity(
         listing=listing,
-        reference_price=ctx.reference_price or (ctx.static_fallback or 0),
+        reference_price=ctx.reference_price or prisjakt_est or (ctx.static_fallback or 0),
         estimated_sell_price=sell,
-        shipping_cost=pricing.shipping_cost(listing),
+        shipping_cost=ship,
         flip_score=adj,
         net_margin=net_margin,
         median_days_to_sold=dts,
-        red_flags=redflags.detect(listing),
+        red_flags=text_flags,
         vision=v,
+        haggle_price=haggle,
     )
     if await telegram.send(opp):
         repo.record_alert(listing.source, listing.external_id, adj)

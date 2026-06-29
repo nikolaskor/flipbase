@@ -18,17 +18,21 @@ from src.models.schemas import Listing, VisionAssessment
 
 _client = Anthropic(api_key=settings.anthropic_api_key)
 
-_PROMPT = """Du vurderer stand paa et brukt produkt fra en FINN-annonse.
+_PROMPT = """Du vurderer salgsverdien paa et brukt produkt fra en FINN-annonse.
 Produkt: {title}
 Kategori: {category}
+Selgers beskrivelse: {description}
 
-Se paa bildene og vurder:
-1. Synlig stand paa en skala 1-10 (10 = som ny)
-2. Konkrete synlige skader (riper, sprekker, slitasje, manglende deler)
-3. Hvor sikker du er (0-1), gitt bildekvalitet og vinkler
+Vurder BAADE bildene og beskrivelsen samlet:
+1. Samlet stand paa en skala 1-10 (10 = som ny). Trekk ned for ikke-originale deler
+   (skjerm, batteri), synlige skader, eller mistillit mellom bilde og tekst.
+2. Konkrete problemer: riper, sprekker, slitasje, ettermarkedsdeler, uoverensstemmelser
+3. Hvor sikker du er (0-1)
 
 Svar KUN med JSON, ingen annen tekst:
 {{"condition_score": <int>, "visible_damage": [<string>], "summary": "<kort>", "confidence": <float>}}"""
+
+_MAX_DESC_CHARS = 600
 
 
 async def assess(listing: Listing) -> VisionAssessment | None:
@@ -39,6 +43,7 @@ async def assess(listing: Listing) -> VisionAssessment | None:
     if not images:
         return None
 
+    desc = listing.description[:_MAX_DESC_CHARS].strip() or "Ingen beskrivelse"
     content: list[dict] = [
         {"type": "image", "source": {"type": "base64",
                                      "media_type": mt, "data": data}}
@@ -46,7 +51,11 @@ async def assess(listing: Listing) -> VisionAssessment | None:
     ]
     content.append({
         "type": "text",
-        "text": _PROMPT.format(title=listing.title, category=listing.category.value),
+        "text": _PROMPT.format(
+            title=listing.title,
+            category=listing.category.value,
+            description=desc,
+        ),
     })
 
     resp = _client.messages.create(

@@ -116,3 +116,24 @@ def record_alert(source: str, external_id: str, flip_score: float) -> None:
         "flip_score": flip_score,
         "sent_at": datetime.now(timezone.utc).isoformat(),
     }).execute()
+
+
+def get_prisjakt_price(model_key: str) -> tuple[int, datetime] | None:
+    """Returnerer (new_price_nok, fetched_at) eller None hvis ingen rad finnes."""
+    rows = (db().table("prisjakt_prices")
+            .select("new_price_nok,fetched_at")
+            .eq("model_key", model_key)
+            .limit(1)
+            .execute())
+    if not rows.data:
+        return None
+    r = rows.data[0]
+    return r["new_price_nok"], _parse_ts(r["fetched_at"])
+
+
+def upsert_prisjakt_price(model_key: str, new_price_nok: int) -> None:
+    db().table("prisjakt_prices").upsert({
+        "model_key": model_key,
+        "new_price_nok": new_price_nok,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }, on_conflict="model_key").execute()

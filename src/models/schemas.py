@@ -83,3 +83,4 @@ class FlipOpportunity(BaseModel):
     median_days_to_sold: float | None
     red_flags: list[RedFlag] = Field(default_factory=list)
     vision: VisionAssessment | None = None
+    haggle_price: int | None = None

@@ -1,8 +1,13 @@
-"""Prismotor: referansepris, fraktjustering og flip_score.
+"""Prismotor: referansepris, fraktjustering, kondisjonsjustering og flip_score.
 
-Referansepris bygges fra to kilder:
-  1. Median av aktive + historiske annonser for samme model_key (egen data)
-  2. Valgfri statisk fallback (Prisjakt bruktpris) til du har nok egen data
+Referansepris bygges fra tre kilder (prioritet):
+  1. Median av solgte FINN-annonser for samme model_key (vaar egen data)
+  2. Prisjakt ny-pris * avskrivningsfaktor (live, oppdateres daglig)
+  3. Statisk fallback (hardkodet, brukes bare naar alt annet mangler)
+
+Kondisjonsjustering:
+  - Tekst-basert (rod flags fra beskrivelse): skjer foer terskelvurdering
+  - Visjon-basert (Claude score): skjer etter vision-kjoering
 
 flip_score = (estimert_salg - kjopspris - frakt) / kjopspris
 """
@@ -10,18 +15,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.models.schemas import Listing
+from src.models.schemas import Listing, RedFlag, VisionAssessment
 
 
 @dataclass
 class PriceContext:
     reference_price: int          # median av solgte annonser for model_key
     sample_size: int              # antall datapunkter bak referansen
-    static_fallback: int | None   # Prisjakt-referanse hvis lite egen data
+    static_fallback: int | None   # hardkodet fallback naar alt annet mangler
     market_median: int | None = None  # median av aktive FINN-annonser for model_key
+    prisjakt_used_estimate: int | None = None  # Prisjakt ny-pris * avskrivning
 
 
-# Grov fraktmatrise per kategori (Bring/Posten, justeres etter erfaring).
+# Grov fraktmatrise per kategori (Bring/Posten).
 _SHIPPING_BY_CATEGORY = {
     "airpods": 99,
     "phone": 149,
@@ -31,19 +37,98 @@ _SHIPPING_BY_CATEGORY = {
     "camera": 199,
 }
 
+# Kondisjonsdiskontering basert paa roed-flagg i beskrivelsestekst.
+# Kjoeres foer vision, saa vi filtrerer aapenlyst defekte annonser tidlig.
+_FLAG_DISCOUNTS: dict[str, float] = {
+    "non_original_parts": 0.22,
+    "damage_keywords":    0.12,
+}
+
+# Kondisjonsdiskontering basert paa Claude vision-score (1-10).
+_VISION_DISCOUNTS: list[tuple[int, float]] = [
+    (8, 0.00),   # 8-10: ingen rabatt
+    (6, 0.10),   # 6-7:  lett slitasje
+    (4, 0.20),   # 4-5:  synlige skader
+    (0, 0.32),   # 1-3:  betydelig skade
+]
+
 
 def estimate_sell_price(ctx: PriceContext) -> int:
-    """Blander eigen median og beste fallback basert paa hvor mye data vi har.
+    """Returnerer beste estimat for hva annonsen selges for.
 
-    Prioritet for fallback: market_median (live) > static_fallback (hardkodet).
+    Vekter egne FINN-salgdata tyngst. Naar disse er sparsomme, blander vi inn
+    Prisjakt-estimat (live) eller statisk fallback.
     """
     if ctx.sample_size >= 8:
         return ctx.reference_price
-    best_fallback = ctx.market_median if ctx.market_median is not None else ctx.static_fallback
-    if best_fallback is None:
+
+    # Velg beste fallback: Prisjakt-estimat > markedsmedian > statisk
+    fallback = (
+        ctx.prisjakt_used_estimate
+        or ctx.market_median
+        or ctx.static_fallback
+    )
+    if fallback is None:
         return ctx.reference_price
+
     w = ctx.sample_size / 8
-    return round(ctx.reference_price * w + best_fallback * (1 - w))
+    return round(ctx.reference_price * w + fallback * (1 - w))
+
+
+def adjust_for_flags(sell_price: int, flags: list[RedFlag]) -> int:
+    """Trekker fra kondisjonsdiskontering basert paa tekstbaserte roed-flagg.
+
+    Kjoeres foer terskelvurdering slik at aapenlyst defekte annonser filtreres
+    uten aa bruke vision-budsjett.
+    """
+    total_discount = sum(
+        _FLAG_DISCOUNTS.get(f.code, 0.0) for f in flags
+    )
+    total_discount = min(total_discount, 0.40)
+    return round(sell_price * (1 - total_discount))
+
+
+def adjust_for_vision(sell_price: int, vision: VisionAssessment) -> int:
+    """Trekker fra kondisjonsdiskontering basert paa Claude vision-score."""
+    discount = 0.0
+    for threshold, d in _VISION_DISCOUNTS:
+        if vision.condition_score >= threshold:
+            discount = d
+            break
+    return round(sell_price * (1 - discount))
+
+
+def compute_haggle_price(
+    listing_price: int,
+    sell_price: int,
+    ship: int,
+    vision: VisionAssessment | None,
+    flags: list[RedFlag],
+) -> int:
+    """Anbefalt aapningstilbud til selger.
+
+    Basert paa: hva du maksimalt kan betale for aa treffe minimumsmargin, men
+    aldri mer enn et rimelig prosentvis avslag fra listeprisen.
+
+    Rundes ned til naermeste 50 kr.
+    """
+    min_profit = 400
+    max_you_can_pay = sell_price - ship - min_profit
+
+    # Prosentvis avslag basert paa stand
+    if vision and vision.condition_score <= 5:
+        rate = 0.22
+    elif any(f.code == "non_original_parts" for f in flags):
+        rate = 0.20
+    elif vision and vision.condition_score <= 7:
+        rate = 0.15
+    else:
+        rate = 0.10
+
+    pct_offer = round(listing_price * (1 - rate))
+    offer = min(pct_offer, max_you_can_pay)
+    offer = max(offer, listing_price - 1000)  # ikke mer enn 1000 kr under uansett
+    return (offer // 50) * 50  # rund ned til naermeste 50
 
 
 def shipping_cost(listing: Listing) -> int:
@@ -51,7 +136,11 @@ def shipping_cost(listing: Listing) -> int:
 
 
 def compute_flip_score(listing: Listing, ctx: PriceContext) -> tuple[float, int, int]:
-    """Returnerer (flip_score, estimert_salgspris, netto_margin)."""
+    """Returnerer (flip_score, estimert_salgspris, netto_margin).
+
+    Salgsprisen her er RAA (ukondisjonsjustert). Juster separat med
+    adjust_for_flags() og adjust_for_vision() etter behov.
+    """
     sell = estimate_sell_price(ctx)
     ship = shipping_cost(listing)
     net_margin = sell - listing.price - ship

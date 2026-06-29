@@ -45,6 +45,9 @@ def format_alert(opp: FlipOpportunity) -> str:
         if v.visible_damage:
             lines.append("   " + "; ".join(html.escape(d) for d in v.visible_damage))
 
+    if opp.haggle_price is not None:
+        lines.append(f"💬 Foreslaat tilbud: {_kr(opp.haggle_price)}")
+
     if opp.red_flags:
         lines.append("")
         for flag in opp.red_flags:

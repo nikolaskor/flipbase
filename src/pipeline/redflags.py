@@ -8,6 +8,9 @@ from src.models.schemas import Listing, RedFlag
 SCREEN_KEYWORDS = ("skjerm", "display", "screen")
 DAMAGE_KEYWORDS = ("sprekk", "knust", "ripe", "bulk", "defekt", "virker ikke", "feil")
 
+# Ettermarkedsdeler gjor "100% batteri" ubrukelig og senker videresalgsverdi betydelig.
+NON_ORIGINAL_KEYWORDS = ("ikke original", "ikke-original", "ikke originalt", "tredjeparts", "ettermarked")
+
 
 def detect(listing: Listing) -> list[RedFlag]:
     flags: list[RedFlag] = []
@@ -52,6 +55,15 @@ def detect(listing: Listing) -> list[RedFlag]:
         flags.append(RedFlag(
             code="damage_keywords",
             label=f"Skadeord i tekst: {', '.join(hit)}",
+            severity="high",
+        ))
+
+    # Ettermarkedsdeler: skjerm eller batteri som ikke er original
+    non_orig_hit = [k for k in NON_ORIGINAL_KEYWORDS if k in desc]
+    if non_orig_hit:
+        flags.append(RedFlag(
+            code="non_original_parts",
+            label="Ettermarkedsdeler nevnt: margin og batteri-% er upaalitelig",
             severity="high",
         ))
 
