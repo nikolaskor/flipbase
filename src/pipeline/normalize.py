@@ -33,9 +33,32 @@ _KEY_ALIASES: dict[str, str] = {
 # Bare disse kategoriene bruker lagring (128GB/512GB) som prisdifferensiator.
 _STORAGE_CATEGORIES = {Category.PHONE, Category.TABLET}
 
+# Tilbehoer-nokkelord per kategori. Annonser der tittelen inneholder ett av disse
+# er aksessorier, ikke enheter vi vil flippe -- silt ut foer model_key-derivasjon.
+_ACCESSORY_KEYWORDS: dict[Category, frozenset[str]] = {
+    Category.PHONE: frozenset({
+        "deksel", "case", "cover", "lader", "kabel", "adapter",
+        "skjermbeskytter", "panzerglass", "holder", "sugekopp",
+        "stativ", "feste", "wallet", "kortholder", "magsafe pad",
+        "lightning", "usb-c hub", "airtag",
+    }),
+    Category.TABLET: frozenset({
+        "deksel", "case", "cover", "tastatur", "keyboard", "lader",
+        "kabel", "adapter", "skjermbeskytter", "panzerglass", "stativ",
+    }),
+    Category.CONSOLE: frozenset({
+        "kontroller", "controller", "joystick", "kabel", "lader",
+        "headset", "headphones", "spill", "game", "dock",
+    }),
+}
+
 
 def normalize(raw: RawListing, category: Category) -> Listing | None:
     if raw.price is None:
+        return None
+
+    t_lower = raw.title.lower()
+    if any(kw in t_lower for kw in _ACCESSORY_KEYWORDS.get(category, frozenset())):
         return None
 
     model_key = _derive_model_key(raw.title, category)

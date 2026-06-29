@@ -1,4 +1,4 @@
-"""Tester for normalize._derive_model_key.
+"""Tester for normalize._derive_model_key og normalize().
 
 Dekker telefon, konsoll og kamera, og akseptansekravet:
   to kategorier med like marginer rangeres ulikt uten falske model_key-sammenslaainger.
@@ -7,8 +7,47 @@ from __future__ import annotations
 
 import pytest
 
-from src.models.schemas import Category
-from src.pipeline.normalize import _derive_model_key
+from src.models.schemas import Category, RawListing
+from src.pipeline.normalize import _derive_model_key, normalize
+
+
+def _raw(title: str, price: int = 500) -> RawListing:
+    return RawListing(external_id="x", title=title, price=price, url="https://finn.no/x")
+
+
+# --- aksessorier filtreres ut (returnerer None) --------------------------------
+
+@pytest.mark.parametrize("title", [
+    "iPhone 15 Pro Max deksel med MagSafe + sugekopp-pad",
+    "dbramante1928 iPhone 15 Pro deksel",
+    "iPhone 14 pro deksel",
+    "iPhone 13 cover",
+    "Apple lader til iPhone 12",
+    "MagSafe kabel til iPhone",
+    "iPhone 15 kortholder wallet",
+])
+def test_telefon_aksessorier_filtreres_ut(title: str):
+    assert normalize(_raw(title), Category.PHONE) is None
+
+
+@pytest.mark.parametrize("title", [
+    "iPad Air deksel med tastatur",
+    "iPad Pro cover",
+    "iPad skjermbeskytter panzerglass",
+])
+def test_tablet_aksessorier_filtreres_ut(title: str):
+    assert normalize(_raw(title), Category.TABLET) is None
+
+
+def test_ekte_iphone_passerer_filteret():
+    result = normalize(_raw("iPhone 13 128GB"), Category.PHONE)
+    assert result is not None
+    assert result.model_key == "iphone_13_128gb"
+
+
+def test_ekte_ipad_passerer_filteret():
+    result = normalize(_raw("iPad Air"), Category.TABLET)
+    assert result is not None
 
 
 # --- telefon (eksisterende kategori, verifiser at den ikke er brutt) ----------
