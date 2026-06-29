@@ -7,6 +7,7 @@ pipelinen: scrape -> normaliser -> sold-tracking -> pris -> likviditet
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 from statistics import median as _median
 
@@ -21,6 +22,13 @@ from src.pipeline.pricing import PriceContext
 from src.pipeline.sold_tracker import classify_disappeared
 from src.notify import telegram
 from src.scrapers.finn import FinnScraper
+
+
+def _parse_ts(ts: str) -> datetime:
+    """Parser Supabase-tidsstempler paa Python 3.10 (krever 0/3/6 desimalsekunder)."""
+    ts = re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], ts)
+    return datetime.fromisoformat(ts)
+
 
 # Watchlists: kategori -> sokefilter. Statiske fallbackpriser kan ligge her.
 WATCHLISTS: list[tuple[Category, dict]] = [
@@ -131,8 +139,8 @@ def _reconcile_sold(source: str, category: str, seen_now: set[str]) -> None:
     to_sell: list[str] = []
     to_remove: list[str] = []
     for r in disappeared:
-        first = datetime.fromisoformat(r["first_seen"])
-        last = datetime.fromisoformat(r["last_seen"])
+        first = _parse_ts(r["first_seen"])
+        last = _parse_ts(r["last_seen"])
         status = classify_disappeared(first, last)
         if status == ListingStatus.SOLD:
             to_sell.append(r["external_id"])

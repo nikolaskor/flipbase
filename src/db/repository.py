@@ -1,10 +1,21 @@
 """Databaseoperasjoner pipelinen trenger. Tynt lag over Supabase."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from src.db.client import db
 from src.models.schemas import Listing, ListingStatus
+
+
+def _parse_ts(ts: str) -> datetime:
+    """Parser Supabase-tidsstempler paa Python 3.10.
+
+    Python 3.10 fromisoformat krever 0, 3 eller 6 siffer for desimalsekunder.
+    Supabase kan returnere 4-5 siffer (f.eks. .3673). Normaliser til 6.
+    """
+    ts = re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], ts)
+    return datetime.fromisoformat(ts)
 
 
 def upsert_listing(listing: Listing) -> None:
@@ -73,8 +84,8 @@ def sold_durations(model_key: str) -> list[float]:
     out: list[float] = []
     for r in rows.data:
         if r.get("first_seen") and r.get("sold_at"):
-            fs = datetime.fromisoformat(r["first_seen"])
-            sa = datetime.fromisoformat(r["sold_at"])
+            fs = _parse_ts(r["first_seen"])
+            sa = _parse_ts(r["sold_at"])
             out.append((sa - fs).total_seconds() / 86_400)
     return out
 
