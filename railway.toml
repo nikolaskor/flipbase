@@ -6,8 +6,8 @@
 #   */7 * * * *   python -m src.scheduler
 
 [build]
-builder = "nixpacks"
-buildCommand = "playwright install chromium --with-deps"
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "uvicorn src.main:app --host 0.0.0.0 --port $PORT"
