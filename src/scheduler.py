@@ -30,14 +30,10 @@ def _parse_ts(ts: str) -> datetime:
     return datetime.fromisoformat(ts)
 
 
-# Watchlists: kategori -> sokefilter. Statiske fallbackpriser kan ligge her.
+# Watchlists: kategori -> sokefilter.
+# Utvid med airpods, tablet, console, camera naar telefon-logikken er stabil.
 WATCHLISTS: list[tuple[Category, dict]] = [
     (Category.PHONE, {"query": "iphone"}),
-    (Category.AIRPODS, {"query": "airpods+pro"}),
-    (Category.TABLET, {"query": "ipad"}),
-    (Category.CONSOLE, {"query": "ps5"}),
-    (Category.CONSOLE, {"query": "nintendo+switch"}),
-    (Category.CAMERA, {"query": "sony+kamera"}),
 ]
 
 # Statiske referansepriser (Prisjakt bruktpris, oppdater etter egne data).
