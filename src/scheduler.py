@@ -90,12 +90,15 @@ async def _evaluate(listing: Listing, vision_budget: int) -> int:
 
     sample = repo.reference_sample(listing.model_key)
     ref_price = int(_median(sample)) if sample else 0
+    market_sample = repo.active_market_sample(listing.model_key)
+    market_med = int(_median(market_sample)) if market_sample else None
     ctx = PriceContext(
         reference_price=ref_price,
         sample_size=len(sample),
         static_fallback=STATIC_FALLBACK.get(listing.model_key),
+        market_median=market_med,
     )
-    if ctx.reference_price == 0 and ctx.static_fallback is None:
+    if ctx.reference_price == 0 and ctx.market_median is None and ctx.static_fallback is None:
         return vision_budget  # ingen prisbasis enda
 
     flip_score, sell, net_margin = pricing.compute_flip_score(listing, ctx)

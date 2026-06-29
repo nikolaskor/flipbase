@@ -74,6 +74,16 @@ def reference_sample(model_key: str) -> list[int]:
     return [r["price"] for r in rows.data if r["price"]]
 
 
+def active_market_sample(model_key: str) -> list[int]:
+    """Aktive annonse-priser for model_key, til markedsmedianberegning."""
+    rows = (db().table("listings")
+            .select("price")
+            .eq("model_key", model_key)
+            .eq("status", ListingStatus.ACTIVE.value)
+            .execute())
+    return [r["price"] for r in rows.data if r["price"]]
+
+
 def sold_durations(model_key: str) -> list[float]:
     """Dager-til-solgt per solgt annonse, til likviditetsmaal."""
     rows = (db().table("listings")

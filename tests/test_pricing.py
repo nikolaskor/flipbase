@@ -78,6 +78,29 @@ def test_ingen_data_og_ingen_fallback_gir_null():
     assert estimate_sell_price(ctx) == 0
 
 
+def test_market_median_brukes_over_static_fallback():
+    # market_median (live) skal prioriteres over static_fallback (hardkodet)
+    ctx = PriceContext(reference_price=0, sample_size=0, static_fallback=3400, market_median=3800)
+    assert estimate_sell_price(ctx) == 3800
+
+
+def test_market_median_blandes_med_tynn_eigendata():
+    # sample_size=4 -> w=0.5, blander eigen median og market_median
+    ctx = PriceContext(reference_price=3000, sample_size=4, static_fallback=None, market_median=4000)
+    # 3000*0.5 + 4000*0.5 = 3500
+    assert estimate_sell_price(ctx) == 3500
+
+
+def test_market_median_ignoreres_ved_nok_eigendata():
+    ctx = PriceContext(reference_price=3200, sample_size=8, static_fallback=None, market_median=5000)
+    assert estimate_sell_price(ctx) == 3200
+
+
+def test_ingen_market_median_faller_tilbake_til_static():
+    ctx = PriceContext(reference_price=0, sample_size=0, static_fallback=3400, market_median=None)
+    assert estimate_sell_price(ctx) == 3400
+
+
 # --- format_alert (HTML) -----------------------------------------------------
 
 def test_format_inneholder_paakreved_info():
