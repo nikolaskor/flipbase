@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from src.models.schemas import (
-    Category, FlipOpportunity, Listing, ListingStatus, RedFlag,
+    Category, FlipOpportunity, Listing, ListingStatus, RedFlag, VisionAssessment,
 )
 from src.pipeline.pricing import PriceContext, compute_flip_score, estimate_sell_price
 from src.notify.telegram import format_alert, _kr
@@ -140,3 +140,18 @@ def test_kr_formatering():
     assert _kr(3400) == "3 400 kr"
     assert _kr(149) == "149 kr"
     assert _kr(10000) == "10 000 kr"
+
+
+def test_format_vision_viser_bare_score():
+    listing = _listing(2500)
+    opp = _opp(listing, sell=3400, margin=751, score=0.30)
+    opp.vision = VisionAssessment(
+        condition_score=8,
+        visible_damage=["liten ripe"],
+        summary="Telefonen ser pen ut med liten ripe i kanten.",
+        confidence=0.9,
+    )
+    text = format_alert(opp)
+    assert "Stand (AI): 8/10" in text
+    assert "ripe" not in text
+    assert "pen ut" not in text
