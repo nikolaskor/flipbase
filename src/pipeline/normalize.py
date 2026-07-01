@@ -10,9 +10,12 @@ from datetime import datetime, timezone
 
 from src.models.schemas import Category, Listing, ListingStatus, RawListing
 
+# Kun iPhone 12-14 (standard, Pro, Pro Max, Plus, mini) er i watchlisten.
+_ALLOWED_IPHONE_GENERATIONS = frozenset({12, 13, 14})
+
 # Enkle regelbaserte modellnokler. Utvides etter hvert.
 _MODEL_PATTERNS: list[tuple[Category, str, str]] = [
-    (Category.PHONE, r"iphone\s*1[0-6]\s*(pro\s*max|pro|plus|mini)?", "iphone"),
+    (Category.PHONE, r"iphone\s*1[234]\s*(pro\s*max|pro|plus|mini)?", "iphone"),
     (Category.AIRPODS, r"airpods\s*(pro\s*2|pro|max|3|2)?", "airpods"),
     (Category.TABLET, r"ipad\s*(pro|air|mini)?", "ipad"),
     (Category.CONSOLE, r"(ps5|playstation\s*5)", "ps5"),
@@ -40,7 +43,8 @@ _ACCESSORY_KEYWORDS: dict[Category, frozenset[str]] = {
         "deksel", "case", "cover", "lader", "kabel", "adapter",
         "skjermbeskytter", "panzerglass", "holder", "sugekopp",
         "stativ", "feste", "wallet", "kortholder", "magsafe pad",
-        "lightning", "usb-c hub", "airtag",
+        "lightning", "usb-c hub", "airtag", "reim", "strap",
+        "etui",
     }),
     Category.TABLET: frozenset({
         "deksel", "case", "cover", "tastatur", "keyboard", "lader",
@@ -53,6 +57,25 @@ _ACCESSORY_KEYWORDS: dict[Category, frozenset[str]] = {
 }
 
 
+def is_allowed_iphone_model_key(model_key: str) -> bool:
+    """True bare for iphone_12/13/14-varianter (inkl. Pro, Pro Max, Plus, mini)."""
+    m = re.match(r"iphone_(\d+)", model_key)
+    if not m:
+        return False
+    return int(m.group(1)) in _ALLOWED_IPHONE_GENERATIONS
+
+
+def _title_has_allowed_iphone(title: str) -> bool:
+    """Krever at tittelen faktisk nevner en iPhone 12, 13 eller 14."""
+    m = re.search(
+        r"iphone\s*(\d{1,2})\s*(pro\s*max|pro|plus|mini)?",
+        title.lower(),
+    )
+    if not m:
+        return False
+    return int(m.group(1)) in _ALLOWED_IPHONE_GENERATIONS
+
+
 def normalize(raw: RawListing, category: Category) -> Listing | None:
     if raw.price is None:
         return None
@@ -61,7 +84,12 @@ def normalize(raw: RawListing, category: Category) -> Listing | None:
     if any(kw in t_lower for kw in _ACCESSORY_KEYWORDS.get(category, frozenset())):
         return None
 
+    if category == Category.PHONE and not _title_has_allowed_iphone(raw.title):
+        return None
+
     model_key = _derive_model_key(raw.title, category)
+    if category == Category.PHONE and not is_allowed_iphone_model_key(model_key):
+        return None
     now = datetime.now(timezone.utc)
 
     return Listing(
