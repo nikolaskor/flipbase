@@ -17,7 +17,7 @@ from statistics import median as _median
 from src.config import settings
 from src.db import repository as repo
 from src.models.schemas import (
-    Category, FlipOpportunity, Listing, ListingStatus,
+    Category, FlipOpportunity, Listing, ListingStatus, VisionAssessment,
 )
 from src.pipeline import liquidity, pricing, redflags, vision
 from src.pipeline.normalize import is_allowed_iphone_model_key, normalize
@@ -133,30 +133,42 @@ async def _evaluate(listing: Listing, vision_budget: int) -> int:
             and ctx.static_fallback is None and ctx.prisjakt_used_estimate is None:
         return vision_budget  # ingen prisbasis enda
 
-    # Trekk flagg fra beskrivelsestekst og juster salgspris FoR terskelvurdering.
-    # Slik slipper vi aa sende vision-budsjett paa aapenlyst defekte annonser.
+    # Trekk flagg fra beskrivelsestekst.
     text_flags = redflags.detect(listing)
     _, raw_sell, _ = pricing.compute_flip_score(listing, ctx)
-    sell = pricing.adjust_for_flags(raw_sell, text_flags)
-
     ship = pricing.shipping_cost(listing)
+    dts = liquidity.median_days_to_sold(repo.sold_durations(listing.model_key))
+
+    unreliable_desc = vision.needs_for_pricing(listing, text_flags)
+    v: VisionAssessment | None = None
+
+    if unreliable_desc:
+        # Tynn eller manglende beskrivelse: vision maa kjore foer prisforslag.
+        if vision_budget <= 0 or not listing.image_urls:
+            return vision_budget
+        v = await vision.assess(listing)
+        vision_budget -= 1
+        if not v:
+            return vision_budget
+        sell = pricing.adjust_sell_price(raw_sell, text_flags, v, trust_vision=True)
+    else:
+        sell = pricing.adjust_sell_price(raw_sell, text_flags)
+        net_margin = sell - listing.price - ship
+        flip_score = round(net_margin / listing.price, 3) if listing.price else 0.0
+        if liquidity.adjusted_score(flip_score, dts) < settings.flip_score_threshold:
+            return vision_budget
+        if vision_budget > 0 and listing.image_urls:
+            v = await vision.assess(listing)
+            vision_budget -= 1
+            if v:
+                sell = pricing.adjust_sell_price(raw_sell, text_flags, v)
+
     net_margin = sell - listing.price - ship
     flip_score = round(net_margin / listing.price, 3) if listing.price else 0.0
-
-    dts = liquidity.median_days_to_sold(repo.sold_durations(listing.model_key))
     adj = liquidity.adjusted_score(flip_score, dts)
 
     if adj < settings.flip_score_threshold:
         return vision_budget
-
-    v = None
-    if vision_budget > 0:
-        v = await vision.assess(listing)
-        vision_budget -= 1
-        if v:
-            sell = pricing.adjust_for_vision(sell, v)
-            net_margin = sell - listing.price - ship
-            adj = round(net_margin / listing.price, 3) if listing.price else 0.0
 
     haggle = pricing.compute_haggle_price(listing.price, sell, ship, v, text_flags)
 

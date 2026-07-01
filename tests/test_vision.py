@@ -6,8 +6,8 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.models.schemas import Category, Listing, ListingStatus, VisionAssessment
-from src.pipeline.vision import _parse
+from src.models.schemas import Category, Listing, ListingStatus, RedFlag, VisionAssessment
+from src.pipeline.vision import _parse, needs_for_pricing
 
 
 def _listing(image_urls: list[str]) -> Listing:
@@ -102,3 +102,22 @@ def test_assess_kaller_haiku_modellen():
     assert result is not None
     assert result.condition_score == 9
     assert mock_create.call_args.kwargs["model"] == "claude-haiku-4-5"
+
+
+def test_needs_for_pricing_mangler_beskrivelse():
+    listing = _listing(["https://img.finncdn.no/a.jpg"])
+    object.__setattr__(listing, "description", "")
+    assert needs_for_pricing(listing, []) is True
+
+
+def test_needs_for_pricing_kort_beskrivelse():
+    listing = _listing(["https://img.finncdn.no/a.jpg"])
+    object.__setattr__(listing, "description", "God stand selges raskt")
+    assert needs_for_pricing(listing, []) is True
+
+
+def test_needs_for_pricing_god_beskrivelse():
+    listing = _listing(["https://img.finncdn.no/a.jpg"])
+    words = " ".join(["ord"] * 25)
+    object.__setattr__(listing, "description", words)
+    assert needs_for_pricing(listing, []) is False

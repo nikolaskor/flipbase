@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from src.models.schemas import (
     Category, FlipOpportunity, Listing, ListingStatus, RedFlag, VisionAssessment,
 )
-from src.pipeline.pricing import PriceContext, compute_flip_score, estimate_sell_price
+from src.pipeline.pricing import (
+    PriceContext, adjust_sell_price, compute_flip_score, estimate_sell_price,
+)
 from src.notify.telegram import format_alert, _kr
 
 
@@ -155,3 +157,33 @@ def test_format_vision_viser_bare_score():
     assert "Stand (AI): 8/10" in text
     assert "ripe" not in text
     assert "pen ut" not in text
+
+
+def test_adjust_sell_price_trust_vision_ignorerer_tekstskade():
+    flags = [RedFlag(code="damage_keywords", label="knust", severity="high")]
+    vision = VisionAssessment(
+        condition_score=8, visible_damage=[], summary="", confidence=0.9,
+    )
+    without_vision = adjust_sell_price(3000, flags)
+    with_vision = adjust_sell_price(3000, flags, vision, trust_vision=True)
+    assert without_vision == 2640  # 12% tekstrabatt
+    assert with_vision == 3000     # vision 8/10, ingen rabatt
+
+
+def test_adjust_sell_price_trust_vision_beholder_ettermarked():
+    flags = [RedFlag(code="non_original_parts", label="tredjeparts", severity="high")]
+    vision = VisionAssessment(
+        condition_score=9, visible_damage=[], summary="", confidence=0.9,
+    )
+    result = adjust_sell_price(3000, flags, vision, trust_vision=True)
+    assert result == 2340  # 22% for ikke-original deler
+
+
+def test_adjust_sell_price_god_beskrivelse_kombinerer_tekst_og_vision():
+    flags = [RedFlag(code="damage_keywords", label="ripe", severity="high")]
+    vision = VisionAssessment(
+        condition_score=6, visible_damage=["ripe"], summary="", confidence=0.8,
+    )
+    result = adjust_sell_price(3000, flags, vision)
+    # 12% tekst + 10% vision = 2640 -> 2376
+    assert result == 2376
