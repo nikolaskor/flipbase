@@ -20,7 +20,7 @@ from src.models.schemas import (
     Category, FlipOpportunity, Listing, ListingStatus,
 )
 from src.pipeline import liquidity, pricing, redflags, vision
-from src.pipeline.normalize import normalize
+from src.pipeline.normalize import is_allowed_iphone_model_key, normalize
 from src.pipeline.pricing import PriceContext
 from src.pipeline.sold_tracker import classify_disappeared
 from src.notify import telegram
@@ -111,6 +111,9 @@ async def run_once() -> None:
 
 
 async def _evaluate(listing: Listing, vision_budget: int) -> int:
+    if listing.category == Category.PHONE and not is_allowed_iphone_model_key(listing.model_key):
+        return vision_budget
+
     if repo.already_alerted(listing.source, listing.external_id):
         return vision_budget
 

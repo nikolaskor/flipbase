@@ -56,7 +56,7 @@ def test_ekte_ipad_passerer_filteret():
     ("iPhone 13 128GB",          "iphone_13_128gb"),
     ("iPhone 13 Pro 256GB",      "iphone_13_pro_256gb"),
     ("iPhone 14 Pro Max 512GB",  "iphone_14_pro_max_512gb"),
-    ("iPhone 15 128 GB",         "iphone_15_128gb"),
+    ("iPhone 12 64GB",           "iphone_12_64gb"),
     ("Apple iPhone 13 128GB",    "iphone_13_128gb"),
 ])
 def test_iphone_model_key(title: str, expected: str):
@@ -142,3 +142,37 @@ def test_ukjent_konsoll_gir_fallback():
 
 def test_ukjent_telefon_gir_fallback():
     assert _derive_model_key("Samsung Galaxy S24", Category.PHONE) == "phone_unknown"
+
+
+def test_iphone_15_gir_ukjent_model_key():
+    assert _derive_model_key("iPhone 15 128 GB", Category.PHONE) == "phone_unknown"
+
+
+# --- kun iPhone 12-14 slipper gjennom normalize --------------------------------
+
+@pytest.mark.parametrize("title", [
+    "UAG reim til Apple Watch 42/44/49",
+    "ISY TRÅDLØS MUS (brukt kun i 1 uke)",
+    "Varm skijakke svart",
+    "Vin sett i boksen",
+    "Samsung Galaxy S24 128GB",
+    "iPhone 11 64GB",
+    "iPhone 15 Pro Max 256GB",
+    "Apple Watch Series 8",
+])
+def test_ikke_iphone_12_14_filtreres_ut(title: str):
+    assert normalize(_raw(title), Category.PHONE) is None
+
+
+@pytest.mark.parametrize("title,expected_key", [
+    ("iPhone 12 128GB svart",        "iphone_12_128gb"),
+    ("iPhone 13 Pro 256GB",          "iphone_13_pro_256gb"),
+    ("iPhone 14 Pro Max 512GB",      "iphone_14_pro_max_512gb"),
+    ("Apple iPhone 14 128 GB",       "iphone_14_128gb"),
+    ("iPhone 13 mini 128GB",         "iphone_13_mini_128gb"),
+    ("iPhone 14 Plus 128GB",         "iphone_14_plus_128gb"),
+])
+def test_iphone_12_14_slipper_gjennom(title: str, expected_key: str):
+    result = normalize(_raw(title), Category.PHONE)
+    assert result is not None
+    assert result.model_key == expected_key
