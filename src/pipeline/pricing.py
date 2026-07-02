@@ -6,8 +6,9 @@ Referansepris bygges fra tre kilder (prioritet):
   3. Statisk fallback (hardkodet, brukes bare naar alt annet mangler)
 
 Kondisjonsjustering:
-  - Tekst-basert (rod flags fra beskrivelse): skjer foer terskelvurdering
-  - Visjon-basert (Claude score): skjer etter vision-kjoering
+  - Tekst-basert (rod flags fra beskrivelse): brukes naar beskrivelsen er paalitelig
+  - Visjon-basert (Claude score): paakrevd naar beskrivelsen er tynn/mangler
+  - adjust_sell_price() velger riktig strategi
 
 flip_score = (estimert_salg - kjopspris - frakt) / kjopspris
 """
@@ -96,6 +97,32 @@ def adjust_for_vision(sell_price: int, vision: VisionAssessment) -> int:
             discount = d
             break
     return round(sell_price * (1 - discount))
+
+
+def adjust_sell_price(
+    sell_price: int,
+    flags: list[RedFlag],
+    vision: VisionAssessment | None = None,
+    *,
+    trust_vision: bool = False,
+) -> int:
+    """Justerer salgsestimat etter stand.
+
+    Naar trust_vision=True (tynn/manglende beskrivelse), styrer vision-score
+    kondisjonen. Tekstbaserte skadeord ignoreres da de ofte mangler.
+    Ettermarkedsdeler fra tekst beholdes fordi selger noen ganger skriver det eksplisitt.
+    """
+    if trust_vision:
+        if not vision:
+            return sell_price
+        price = adjust_for_vision(sell_price, vision)
+        text_only = [f for f in flags if f.code == "non_original_parts"]
+        return adjust_for_flags(price, text_only)
+
+    price = adjust_for_flags(sell_price, flags)
+    if vision:
+        price = adjust_for_vision(price, vision)
+    return price
 
 
 def compute_haggle_price(

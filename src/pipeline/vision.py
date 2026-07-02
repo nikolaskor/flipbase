@@ -14,7 +14,7 @@ import httpx
 from anthropic import Anthropic
 
 from src.config import settings
-from src.models.schemas import Listing, VisionAssessment
+from src.models.schemas import Listing, RedFlag, VisionAssessment
 
 _client = Anthropic(api_key=settings.anthropic_api_key)
 
@@ -33,6 +33,16 @@ Svar KUN med JSON, ingen annen tekst:
 {{"condition_score": <int>, "visible_damage": [<string>], "summary": "<kort>", "confidence": <float>}}"""
 
 _MAX_DESC_CHARS = 600
+_MIN_RELIABLE_DESC_WORDS = 20
+
+
+def needs_for_pricing(listing: Listing, flags: list[RedFlag]) -> bool:
+    """True naar beskrivelsen er for tynn til aa stole paa uten bildeanalyse."""
+    desc = listing.description.strip()
+    if not desc or len(desc.split()) < _MIN_RELIABLE_DESC_WORDS:
+        return True
+    unreliable_codes = {"few_images", "no_screen_mention", "short_description"}
+    return any(f.code in unreliable_codes for f in flags)
 
 
 async def assess(listing: Listing) -> VisionAssessment | None:

@@ -40,10 +40,7 @@ def format_alert(opp: FlipOpportunity) -> str:
     lines.append(f"📍 {loc}{dist}, frakt: {_kr(opp.shipping_cost)}")
 
     if opp.vision:
-        v = opp.vision
-        lines.append(f"👁 Stand (AI): {v.condition_score}/10, {html.escape(v.summary)}")
-        if v.visible_damage:
-            lines.append("   " + "; ".join(html.escape(d) for d in v.visible_damage))
+        lines.append(f"👁 Stand (AI): {opp.vision.condition_score}/10")
 
     if opp.haggle_price is not None:
         lines.append(f"💬 Foreslaat tilbud: {_kr(opp.haggle_price)}")
