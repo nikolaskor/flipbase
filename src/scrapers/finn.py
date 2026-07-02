@@ -44,7 +44,10 @@ SEL_CARD = "article"
 SEL_AD_LINK = "a[href*='/item/'], a[href*='finnkode=']"
 SEL_TITLE = "h2, h3"
 SEL_IMG = "img"
-# Detaljside: Open Graph-metatagger er en stabil kilde og holder for M1.
+# Detaljside: hent full beskrivelse fra rendret DOM (og:description er ofte avkortet).
+SEL_DESCRIPTION = '[data-testid="description"]'
+SEL_DESCRIPTION_BODY = '[data-testid="description"] .whitespace-pre-wrap'
+SEL_TOGGLE_DESCRIPTION = '[data-testid="toggle-description"]'
 SEL_OG_DESCRIPTION = "meta[property='og:description']"
 SEL_OG_IMAGE = "meta[property='og:image']"
 SEL_DETAIL_IMG = "img[src*='finncdn']"
@@ -182,6 +185,10 @@ class FinnScraper(BaseScraper):
             for raw in results[: self.detail_limit]:
                 try:
                     await page.goto(raw.url, wait_until="domcontentloaded", timeout=30_000)
+                    try:
+                        await page.wait_for_selector(SEL_DESCRIPTION, timeout=10_000)
+                    except Exception:
+                        pass
                     description, images = await self._parse_detail(page)
                     if description:
                         raw.description = description
@@ -195,8 +202,8 @@ class FinnScraper(BaseScraper):
             await page.close()
 
     async def _parse_detail(self, page) -> tuple[str, list[str]]:
-        """Henter beskrivelse (og:description) og bilde-URLer fra detaljsiden."""
-        description = await self._meta(page, SEL_OG_DESCRIPTION) or ""
+        """Henter full beskrivelse fra detaljsiden og bilde-URLer."""
+        description = await self._extract_description(page)
 
         images: list[str] = []
         og_image = await self._meta(page, SEL_OG_IMAGE)
@@ -208,6 +215,36 @@ class FinnScraper(BaseScraper):
                 images.append(src)
 
         return description.strip(), images
+
+    async def _extract_description(self, page) -> str:
+        """Henter full beskrivelse fra rendret DOM. Klikker utvid-knapp om den finnes."""
+        try:
+            toggle = await page.query_selector(SEL_TOGGLE_DESCRIPTION)
+            if toggle:
+                # JS-klikk fungerer selv naar knappen er skjult av CSS (read-more).
+                await page.evaluate("(el) => el.click()", toggle)
+
+            body = await page.query_selector(SEL_DESCRIPTION_BODY)
+            if body:
+                return self._clean_description(await body.inner_text())
+
+            root = await page.query_selector(SEL_DESCRIPTION)
+            if root:
+                return self._clean_description(await root.inner_text())
+        except Exception:
+            pass
+
+        return (await self._meta(page, SEL_OG_DESCRIPTION) or "").strip()
+
+    @staticmethod
+    def _clean_description(text: str) -> str:
+        """Fjerner overskrift, utvid-knapp og hjelpetekst fra beskrivelsesfeltet."""
+        cleaned = text.strip()
+        if cleaned.lower().startswith("beskrivelse"):
+            cleaned = cleaned[len("beskrivelse"):].strip()
+        cleaned = re.sub(r"\s*Vis hele beskrivelsen\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*NB:.*$", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        return cleaned.strip()
 
     # --- hjelpere ---------------------------------------------------------
 

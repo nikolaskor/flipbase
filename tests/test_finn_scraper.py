@@ -62,9 +62,21 @@ SEARCH_FIXTURE = """
 
 DETAIL_FIXTURE = """
 <!doctype html><html><head>
-  <meta property="og:description" content="Pent brukt iPhone 13, 128GB, ingen riper. Kvittering finnes.">
+  <meta property="og:description" content="Kort og avkortet fra meta.">
   <meta property="og:image" content="https://images.finncdn.no/dynamic/1600w/main.jpg">
 </head><body>
+  <section data-testid="description">
+    <div class="import-decoration relative read-more">
+      <div class="whitespace-pre-wrap">
+        <h2 class="h3">Beskrivelse</h2>
+        <p>Selger iPhone 13 i god stand.</p>
+        <p>Original skjerm og batteri. Ingen riper.</p>
+        <p>Batterikapasitet 84 prosent.</p>
+      </div>
+    </div>
+    <button data-testid="toggle-description">Vis hele beskrivelsen</button>
+    <p>NB: Knappen for å vise hele beskrivelsen har kun en visuell effekt.</p>
+  </section>
   <img src="https://images.finncdn.no/dynamic/1600w/img1.jpg">
   <img src="https://images.finncdn.no/dynamic/1600w/img2.jpg">
   <img src="https://www.example.com/tracking-pixel.gif">
@@ -138,13 +150,31 @@ def test_extract_cards_parses_listings():
 
 def test_parse_detail_extracts_description_and_images():
     description, images = _run(_detail(DETAIL_FIXTURE))
-    assert description.startswith("Pent brukt iPhone 13")
+    assert "Selger iPhone 13 i god stand." in description
+    assert "Batterikapasitet 84 prosent." in description
+    assert "Vis hele beskrivelsen" not in description
+    assert "Kort og avkortet fra meta." not in description
     # og:image forst, deretter finncdn-bilder, ikke-finncdn filtreres bort.
     assert images == [
         "https://images.finncdn.no/dynamic/1600w/main.jpg",
         "https://images.finncdn.no/dynamic/1600w/img1.jpg",
         "https://images.finncdn.no/dynamic/1600w/img2.jpg",
     ]
+
+
+def test_clean_description_fjerner_knappetekst():
+    raw = "Beskrivelse\n\nPen telefon.\n\nVis hele beskrivelsen\nNB: test"
+    assert FinnScraper._clean_description(raw) == "Pen telefon."
+
+
+def test_parse_detail_faller_tilbake_til_og_description():
+    fixture = """
+    <!doctype html><html><head>
+      <meta property="og:description" content="Fallback fra meta tag.">
+    </head><body></body></html>
+    """
+    description, _ = _run(_detail(fixture))
+    assert description == "Fallback fra meta tag."
 
 
 # --- rene hjelpere (ingen browser) ------------------------------------------
